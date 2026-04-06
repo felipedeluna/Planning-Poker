@@ -801,15 +801,13 @@ const I18N = {
   }
 };
 
-let ws, myId, myName, myColor, mySessionId;
+let myId, myName, myColor, mySessionId;
 let appState = {};
 let myVotes = {}; // demandId+roundIdx → value
-let reconnectTimer = null;
-let suppressReconnect = false;
-let reconnectDelay = 600;
-let socketGeneration = 0;
+let pollTimer = null;
 let heartbeatTimer = null;
-let pendingMessages = [];
+let syncingNow = false;
+let reconnecting = false;
 let reconnectToastAt = 0;
 let currentLang = localStorage.getItem(STORAGE_LANG_KEY) || 'pt';
 
@@ -865,81 +863,101 @@ function enterJoinScreen() {
   av.style.background = 'transparent';
 }
 
-// ─── WebSocket ───────────────────────────────────────────────────────────────
-function connect() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${proto}//${location.host}`);
-  const myGeneration = ++socketGeneration;
-  ws = socket;
+function stopSync() {
+  clearInterval(pollTimer);
+  clearInterval(heartbeatTimer);
+  pollTimer = null;
+  heartbeatTimer = null;
+  syncingNow = false;
+}
 
-  socket.onopen = () => {
-    if (ws !== socket || myGeneration !== socketGeneration) return;
-    reconnectDelay = 600;
-    reconnectToastAt = 0;
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'ping' }));
-      }
-    }, 20000);
-    if (myName) send({ type: 'join', name: myName, sessionId: mySessionId });
-    flushPendingMessages();
-  };
-  socket.onmessage = e => {
-    if (ws !== socket || myGeneration !== socketGeneration) return;
-    let data;
-    try { data = JSON.parse(e.data); } catch { return; }
-    if (data.type === 'join_ack') {
-      myId = data.participantId;
-      mySessionId = data.sessionId || mySessionId;
-      if (mySessionId) localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
-      return;
+async function fetchState(touch = false) {
+  if (!myName || syncingNow) return;
+  syncingNow = true;
+
+  try {
+    const params = new URLSearchParams();
+    if (touch) params.set('touch', '1');
+    params.set('name', myName);
+    if (mySessionId) params.set('sessionId', mySessionId);
+
+    const res = await fetch(`/api/state?${params.toString()}`);
+    if (!res.ok) throw new Error('state request failed');
+
+    const data = await res.json();
+    if (data?.participantId) myId = data.participantId;
+    if (data?.sessionId) {
+      mySessionId = data.sessionId;
+      localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
     }
-    if (data.type === 'state') {
-      appState = data;
+    if (data?.state) {
+      appState = data.state;
       render();
     }
-  };
-  socket.onclose = () => {
-    if (ws !== socket || myGeneration !== socketGeneration) return;
-    clearInterval(heartbeatTimer);
-    ws = null;
-    if (suppressReconnect) return;
-    clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 1.5, 4000);
-  };
-  socket.onerror  = () => {
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
+
+    reconnecting = false;
+    reconnectToastAt = 0;
+  } catch {
+    reconnecting = true;
+    const now = Date.now();
+    if (now - reconnectToastAt > 2000) {
+      reconnectToastAt = now;
+      toast(t('reconnectQueued'));
     }
-  };
+  } finally {
+    syncingNow = false;
+  }
+}
+
+async function postAction(obj) {
+  if (!myName) return;
+
+  try {
+    const res = await fetch('/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...obj,
+        name: myName,
+        sessionId: mySessionId,
+      }),
+    });
+
+    if (!res.ok) throw new Error('action request failed');
+    const data = await res.json();
+
+    if (data?.participantId) myId = data.participantId;
+    if (data?.sessionId) {
+      mySessionId = data.sessionId;
+      localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
+    }
+    if (data?.state) {
+      appState = data.state;
+      render();
+    }
+
+    reconnecting = false;
+    reconnectToastAt = 0;
+  } catch {
+    reconnecting = true;
+    const now = Date.now();
+    if (now - reconnectToastAt > 2000) {
+      reconnectToastAt = now;
+      toast(t('reconnectQueued'));
+    }
+    fetchState(true);
+  }
+}
+
+function startSync() {
+  stopSync();
+  fetchState(true);
+  pollTimer = setInterval(() => fetchState(false), 1200);
+  heartbeatTimer = setInterval(() => postAction({ type: 'ping' }), 12000);
 }
 
 function send(obj) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(obj));
-    return;
-  }
-
-  pendingMessages.push(obj);
-  connect();
-
-  const now = Date.now();
-  if (now - reconnectToastAt > 2000) {
-    reconnectToastAt = now;
-    toast(t('reconnectQueued'));
-  }
-}
-
-function flushPendingMessages() {
-  if (!ws || ws.readyState !== WebSocket.OPEN || pendingMessages.length === 0) return;
-  const queue = pendingMessages;
-  pendingMessages = [];
-  for (const msg of queue) {
-    ws.send(JSON.stringify(msg));
-  }
+  postAction(obj);
 }
 
 // ─── Join ────────────────────────────────────────────────────────────────────
@@ -947,24 +965,17 @@ function joinSession() {
   const name = document.getElementById('name-input').value.trim();
   if (!name) { toast(t('enterName')); return; }
 
-  suppressReconnect = true;
-  clearTimeout(reconnectTimer);
-  clearInterval(heartbeatTimer);
+  stopSync();
   myId = null;
   myColor = null;
   myVotes = {};
-  pendingMessages = [];
   myName = name;
   mySessionId = generateSessionId();
   localStorage.setItem(STORAGE_NAME_KEY, myName);
   localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
 
   enterAppScreen();
-
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) ws.close();
-  ws = null;
-  suppressReconnect = false;
-  connect();
+  startSync();
 }
 
 function restoreSession() {
@@ -980,17 +991,11 @@ function restoreSession() {
   localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
   document.getElementById('name-input').value = myName;
   enterAppScreen();
-  connect();
+  startSync();
 }
 
 function changeUser() {
-  suppressReconnect = true;
-  clearTimeout(reconnectTimer);
-  clearInterval(heartbeatTimer);
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-    ws.close();
-  }
-  ws = null;
+  stopSync();
 
   localStorage.removeItem(STORAGE_NAME_KEY);
   localStorage.removeItem(STORAGE_SESSION_KEY);
@@ -999,7 +1004,7 @@ function changeUser() {
   myColor = null;
   mySessionId = null;
   myVotes = {};
-  pendingMessages = [];
+  reconnecting = false;
   appState = {};
   document.getElementById('name-input').value = '';
   enterJoinScreen();

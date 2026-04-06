@@ -1,1 +1,7 @@
 state.json
+node_modules/
+dist/
+build/
+.env
+.vercel
+.env*.local
