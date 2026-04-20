@@ -2,6 +2,7 @@ const {
   loadState,
   saveState,
   ensureRoomParticipant,
+  findParticipantBySession,
   getPublicState,
   applyRoomAction,
   readJson,
@@ -31,7 +32,7 @@ module.exports = async (req, res) => {
   const sessionId = String(body.sessionId || '').trim() || generateId();
   const roomCode = sanitizeRoomCode(body.roomCode);
   let room = getRoom(state, roomCode);
-  let participant = room ? ensureRoomParticipant(room, sessionId, name, avatar) : null;
+  let participant = room ? findParticipantBySession(room, sessionId) : null;
   let currentRoomCode = room?.code || null;
   let error = null;
 
@@ -61,7 +62,11 @@ module.exports = async (req, res) => {
     default: {
       if (!room) {
         error = 'Room not selected';
+      } else if (!participant) {
+        currentRoomCode = null;
+        error = 'Removed from room';
       } else {
+        participant = ensureRoomParticipant(room, sessionId, name, avatar);
         applyRoomAction(room, participant, body);
       }
       break;

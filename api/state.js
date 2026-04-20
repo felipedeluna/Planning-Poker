@@ -2,10 +2,10 @@ const {
   loadState,
   saveState,
   ensureRoomParticipant,
+  findParticipantBySession,
   getPublicState,
   getQuery,
   sendJson,
-  generateId,
   getRoom,
   sanitizeRoomCode,
 } = require('./_core');
@@ -28,21 +28,25 @@ module.exports = async (req, res) => {
   let error = null;
 
   const room = getRoom(state, roomCode);
+  let selectedRoomCode = room?.code || null;
+  const existing = room ? findParticipantBySession(room, sessionId) : null;
 
   if (touch && roomCode && !room) {
     error = 'Room not found';
-  } else if (touch && room && name) {
-    if (!sessionId) sessionId = generateId();
-    participant = ensureRoomParticipant(room, sessionId, name, avatar);
-    await saveState(state, storage);
+  } else if (roomCode && room && !existing) {
+    error = 'Removed from room';
+    selectedRoomCode = null;
+  } else if (touch && room && name && existing) {
+      participant = ensureRoomParticipant(room, sessionId, name, avatar);
+      await saveState(state, storage);
   }
 
   sendJson(res, 200, {
     ok: true,
-    state: getPublicState(state, { sessionId, roomCode }),
+    state: getPublicState(state, { sessionId, roomCode: selectedRoomCode }),
     participantId: participant?.id || null,
     sessionId: participant?.sessionId || sessionId || null,
-    roomCode: room?.code || null,
+    roomCode: selectedRoomCode,
     error,
     storage,
   });

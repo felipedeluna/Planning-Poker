@@ -870,6 +870,7 @@ const I18N = {
     leaveRoom: 'Sair da sala',
     roomRequired: 'Você precisa estar em uma sala',
     roomNotFound: 'Sala não encontrada',
+    removedFromRoom: 'Você foi removido da sala',
     switchUser: 'Trocar',
     demands: 'Demandas',
     participants: 'Participantes',
@@ -946,6 +947,7 @@ const I18N = {
     leaveRoom: 'Leave room',
     roomRequired: 'You need to be in a room',
     roomNotFound: 'Room not found',
+    removedFromRoom: 'You were removed from the room',
     switchUser: 'Switch',
     demands: 'Demands',
     participants: 'Participants',
@@ -1159,7 +1161,14 @@ async function fetchState(touch = false) {
     if (!res.ok) throw new Error('state request failed');
 
     const data = await res.json();
-    if (data?.error) toast(data.error === 'Room not found' ? t('roomNotFound') : data.error);
+    if (data?.error) {
+      const msg = data.error === 'Room not found'
+        ? t('roomNotFound')
+        : data.error === 'Removed from room'
+          ? t('removedFromRoom')
+          : data.error;
+      toast(msg);
+    }
     if (data?.participantId) myId = data.participantId;
     if (data?.sessionId) {
       mySessionId = data.sessionId;
@@ -1208,7 +1217,14 @@ async function postAction(obj) {
 
     if (!res.ok) throw new Error('action request failed');
     const data = await res.json();
-    if (data?.error) toast(data.error === 'Room not found' ? t('roomNotFound') : data.error);
+    if (data?.error) {
+      const msg = data.error === 'Room not found'
+        ? t('roomNotFound')
+        : data.error === 'Removed from room'
+          ? t('removedFromRoom')
+          : data.error;
+      toast(msg);
+    }
 
     if (data?.participantId) myId = data.participantId;
     if (data?.sessionId) {

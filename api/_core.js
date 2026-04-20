@@ -213,6 +213,11 @@ function ensureRoomParticipant(room, sessionId, name, avatar) {
   return participant;
 }
 
+function findParticipantBySession(room, sessionId) {
+  if (!room || !sessionId) return null;
+  return Object.values(room.participants).find(p => p.sessionId === sessionId) || null;
+}
+
 function refreshPresence(room) {
   const ts = now();
   for (const participant of Object.values(room.participants)) {
@@ -503,6 +508,7 @@ module.exports = {
   saveState,
   createRoom,
   getRoom,
+  findParticipantBySession,
   ensureRoomParticipant,
   getPublicState,
   applyRoomAction,
