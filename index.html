@@ -1034,6 +1034,30 @@ let reconnectToastAt = 0;
 let currentLang = localStorage.getItem(STORAGE_LANG_KEY) || 'pt';
 let deepLinkRoomCode = '';
 
+function normalizeCredentialName(name) {
+  return String(name || '').trim().toLocaleLowerCase();
+}
+
+function dedupeCredentialsByName(credentials) {
+  const bestByName = new Map();
+  for (const raw of credentials || []) {
+    if (!raw || !raw.name) continue;
+    const key = normalizeCredentialName(raw.name);
+    if (!key) continue;
+    const current = bestByName.get(key);
+    if (!current) {
+      bestByName.set(key, raw);
+      continue;
+    }
+    const currentScore = (current.deleted ? 0 : 1) * 1_000_000_000_000 + (current.lastUsedAt || 0);
+    const nextScore = (raw.deleted ? 0 : 1) * 1_000_000_000_000 + (raw.lastUsedAt || 0);
+    if (nextScore > currentScore) {
+      bestByName.set(key, raw);
+    }
+  }
+  return Array.from(bestByName.values()).sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0));
+}
+
 function sanitizeRoomCodeLocal(code) {
   return String(code || '').replace(/\D/g, '').slice(0, 4);
 }
@@ -1054,14 +1078,14 @@ function buildRoomShareUrl(roomCode) {
 function loadCredentials() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_CREDENTIALS_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? dedupeCredentialsByName(parsed) : [];
   } catch {
     return [];
   }
 }
 
 function saveCredentials(credentials) {
-  localStorage.setItem(STORAGE_CREDENTIALS_KEY, JSON.stringify(credentials));
+  localStorage.setItem(STORAGE_CREDENTIALS_KEY, JSON.stringify(dedupeCredentialsByName(credentials)));
 }
 
 function getActiveCredential() {
@@ -1354,8 +1378,10 @@ function ensureCredentialFromInputs() {
   const name = document.getElementById('name-input').value.trim();
   if (!name) { toast(t('enterName')); return null; }
   const avatar = document.getElementById('avatar-input').value || '🙂';
-  const sameActive = mySessionId && myName && myName === name;
-  const sessionId = sameActive ? mySessionId : generateSessionId();
+  const allCreds = loadCredentials();
+  const sameNameCred = allCreds.find(c => normalizeCredentialName(c.name) === normalizeCredentialName(name));
+  const sameActive = mySessionId && myName && normalizeCredentialName(myName) === normalizeCredentialName(name);
+  const sessionId = sameNameCred?.sessionId || (sameActive ? mySessionId : generateSessionId());
   const cred = upsertCredential({ name, sessionId, avatar });
   activateCredentialAndSync(cred);
   return cred;
