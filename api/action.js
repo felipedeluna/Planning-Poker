@@ -1,12 +1,15 @@
 const {
   loadState,
   saveState,
-  ensureParticipant,
+  ensureRoomParticipant,
   getPublicState,
-  applyAction,
+  applyRoomAction,
   readJson,
   sendJson,
   generateId,
+  createRoom,
+  getRoom,
+  sanitizeRoomCode,
 } = require('./_core');
 
 module.exports = async (req, res) => {
@@ -25,16 +28,54 @@ module.exports = async (req, res) => {
   const { state, storage } = await loadState();
 
   const sessionId = String(body.sessionId || '').trim() || generateId();
-  const participant = ensureParticipant(state, sessionId, name);
+  const roomCode = sanitizeRoomCode(body.roomCode);
+  let room = getRoom(state, roomCode);
+  let participant = room ? ensureRoomParticipant(room, sessionId, name) : null;
+  let currentRoomCode = room?.code || null;
+  let error = null;
 
-  applyAction(state, participant, body);
+  switch (body.type) {
+    case 'create_room': {
+      room = createRoom(state, sessionId, name, body.roomName);
+      participant = ensureRoomParticipant(room, sessionId, name);
+      currentRoomCode = room.code;
+      break;
+    }
+    case 'join_room': {
+      const requestedCode = sanitizeRoomCode(body.targetRoomCode || body.roomCode);
+      const targetRoom = getRoom(state, requestedCode);
+      if (!targetRoom) {
+        error = 'Room not found';
+      } else {
+        room = targetRoom;
+        participant = ensureRoomParticipant(room, sessionId, name);
+        currentRoomCode = room.code;
+      }
+      break;
+    }
+    case 'leave_room': {
+      currentRoomCode = null;
+      break;
+    }
+    default: {
+      if (!room) {
+        error = 'Room not selected';
+      } else {
+        applyRoomAction(room, participant, body);
+      }
+      break;
+    }
+  }
+
   await saveState(state, storage);
 
   sendJson(res, 200, {
     ok: true,
-    state: getPublicState(state),
-    participantId: participant.id,
-    sessionId: participant.sessionId,
+    state: getPublicState(state, { sessionId, roomCode: currentRoomCode }),
+    participantId: participant?.id || null,
+    sessionId: participant?.sessionId || sessionId,
+    roomCode: currentRoomCode,
+    error,
     storage,
   });
 };

@@ -78,6 +78,7 @@
   .join-card h1 {
     font-size: 28px; font-weight: 800;
     background: linear-gradient(135deg, #a49ef0, #7F77DD 50%, #5DCAA5);
+    background-clip: text;
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     margin-bottom: 6px;
   }
@@ -112,6 +113,60 @@
   }
   .join-btn:hover { background: var(--c-accent2); }
   .join-btn:active { transform: scale(0.98); }
+  .join-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .join-input-sm {
+    width: 100%;
+    background: var(--c-surface2);
+    border: 1px solid var(--c-border2);
+    border-radius: var(--r2);
+    color: var(--c-text);
+    font-family: var(--font);
+    font-size: 14px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .join-input-sm:focus { border-color: var(--c-accent); }
+  .join-btn.secondary {
+    background: transparent;
+    border: 1px solid var(--c-border2);
+    color: var(--c-text2);
+    padding: 10px 12px;
+    width: auto;
+    margin-top: 0;
+  }
+  .join-btn.secondary:hover { background: var(--c-surface3); color: var(--c-text); }
+  .owned-rooms {
+    margin-top: 14px;
+    border-top: 1px solid var(--c-border);
+    padding-top: 12px;
+    text-align: left;
+  }
+  .owned-rooms-title {
+    font-size: 10px;
+    letter-spacing: 1.2px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--c-text3);
+    margin-bottom: 8px;
+  }
+  .owned-room-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 1px solid var(--c-border);
+    border-radius: 8px;
+    padding: 8px;
+    margin-bottom: 6px;
+  }
+  .owned-room-item .meta {
+    font-size: 11px;
+    color: var(--c-text3);
+  }
 
   /* ─── Layout ─── */
   #app { display: none; position: relative; z-index: 1; }
@@ -150,6 +205,14 @@
   .header-user {
     display: flex; align-items: center; gap: 8px;
     font-size: 13px; color: var(--c-text2);
+  }
+  .room-chip {
+    border: 1px solid var(--c-border2);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--c-text2);
+    font-family: var(--mono);
   }
   .switch-user-btn {
     background: transparent;
@@ -537,6 +600,7 @@
     font-family: var(--mono);
     font-size: 42px; font-weight: 500;
     background: linear-gradient(135deg, #a49ef0, #5DCAA5);
+    background-clip: text;
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   }
 
@@ -565,6 +629,22 @@
   }
   .participant-you {
     font-size: 10px; color: var(--c-text3); font-family: var(--mono);
+  }
+  .role-badge {
+    display: inline-block;
+    margin-top: 2px;
+    font-size: 10px;
+    border: 1px solid var(--c-border2);
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: var(--c-text2);
+  }
+  .role-badge.owner { border-color: var(--c-amber); color: #f5be66; }
+  .role-badge.admin { border-color: var(--c-accent); color: #b6b0ee; }
+  .participant-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
   }
   .voted-badge {
     margin-left: auto;
@@ -609,6 +689,20 @@
     <p id="join-subtitle">Sprint planning with your team, round by round.</p>
     <input class="join-input" id="name-input" type="text" placeholder="Your name…" maxlength="30" autocomplete="off">
     <button class="join-btn" id="join-btn" onclick="joinSession()">Join Session →</button>
+
+    <div class="join-row">
+      <input class="join-input-sm" id="room-code-input" type="text" placeholder="Room code (4 digits)" maxlength="4" autocomplete="off">
+      <button class="join-btn secondary" id="join-room-btn" onclick="joinRoomFromInput()">Enter</button>
+    </div>
+    <div class="join-row">
+      <input class="join-input-sm" id="room-name-input" type="text" placeholder="New room name" maxlength="40" autocomplete="off">
+      <button class="join-btn secondary" id="create-room-btn" onclick="createRoom()">Create room</button>
+    </div>
+
+    <div class="owned-rooms" id="owned-rooms-wrap" style="display:none">
+      <div class="owned-rooms-title" id="owned-rooms-title">My rooms</div>
+      <div id="owned-rooms-list"></div>
+    </div>
   </div>
 </div>
 
@@ -627,8 +721,10 @@
           <option value="pt">PT</option>
           <option value="en">EN</option>
         </select>
+        <span class="room-chip" id="header-room">Room: ----</span>
         <div class="avatar-sm" id="header-avatar"></div>
         <span id="header-name"></span>
+        <button class="switch-user-btn" id="leave-room-btn" onclick="leaveRoom()">Sair da sala</button>
         <button class="switch-user-btn" id="switch-user-btn" onclick="changeUser()">Trocar</button>
       </div>
     </header>
@@ -695,12 +791,22 @@ const VOTE_LABELS = {
 const STORAGE_NAME_KEY = 'pp_name';
 const STORAGE_SESSION_KEY = 'pp_session_id';
 const STORAGE_LANG_KEY = 'pp_lang';
+const STORAGE_ROOM_KEY = 'pp_room_code';
 
 const I18N = {
   pt: {
     joinSubtitle: 'Planejamento de sprint com o time, rodada por rodada.',
     namePlaceholder: 'Seu nome…',
     joinBtn: 'Entrar na sessão →',
+    roomCodePlaceholder: 'Código da sala (4 dígitos)',
+    roomNamePlaceholder: 'Nome da nova sala',
+    createRoom: 'Criar sala',
+    enterRoom: 'Entrar',
+    myRooms: 'Minhas salas',
+    roomChip: 'Sala: {code}',
+    leaveRoom: 'Sair da sala',
+    roomRequired: 'Você precisa estar em uma sala',
+    roomNotFound: 'Sala não encontrada',
     switchUser: 'Trocar',
     demands: 'Demandas',
     participants: 'Participantes',
@@ -723,6 +829,13 @@ const I18N = {
     you: 'você',
     voted: 'Votou',
     waiting: 'Aguardando...',
+    roleOwner: 'owner',
+    roleAdmin: 'admin',
+    roleMember: 'member',
+    roleSetAdmin: 'Tornar admin',
+    roleSetMember: 'Tornar membro',
+    kickMember: 'Remover',
+    noRoomsYet: 'Você ainda não possui salas criadas',
     status: { pending: 'pendente', voting: 'votando', done: 'concluída' },
     rounds: {
       knowledge: 'Quanto é conhecido sobre a tarefa?',
@@ -752,6 +865,15 @@ const I18N = {
     joinSubtitle: 'Sprint planning with your team, round by round.',
     namePlaceholder: 'Your name…',
     joinBtn: 'Join Session →',
+    roomCodePlaceholder: 'Room code (4 digits)',
+    roomNamePlaceholder: 'New room name',
+    createRoom: 'Create room',
+    enterRoom: 'Enter',
+    myRooms: 'My rooms',
+    roomChip: 'Room: {code}',
+    leaveRoom: 'Leave room',
+    roomRequired: 'You need to be in a room',
+    roomNotFound: 'Room not found',
     switchUser: 'Switch',
     demands: 'Demands',
     participants: 'Participants',
@@ -774,6 +896,13 @@ const I18N = {
     you: 'you',
     voted: 'Voted',
     waiting: 'Waiting...',
+    roleOwner: 'owner',
+    roleAdmin: 'admin',
+    roleMember: 'member',
+    roleSetAdmin: 'Set admin',
+    roleSetMember: 'Set member',
+    kickMember: 'Remove',
+    noRoomsYet: 'You have no rooms created yet',
     status: { pending: 'pending', voting: 'voting', done: 'done' },
     rounds: {
       knowledge: 'How much is known about the task?',
@@ -802,6 +931,7 @@ const I18N = {
 };
 
 let myId, myName, myColor, mySessionId;
+let currentRoomCode = localStorage.getItem(STORAGE_ROOM_KEY) || '';
 let appState = {};
 let myVotes = {}; // demandId+roundIdx → value
 let pollTimer = null;
@@ -833,12 +963,19 @@ function applyI18nStatic() {
   document.getElementById('join-subtitle').textContent = t('joinSubtitle');
   document.getElementById('name-input').placeholder = t('namePlaceholder');
   document.getElementById('join-btn').textContent = t('joinBtn');
+  document.getElementById('room-code-input').placeholder = t('roomCodePlaceholder');
+  document.getElementById('room-name-input').placeholder = t('roomNamePlaceholder');
+  document.getElementById('join-room-btn').textContent = t('enterRoom');
+  document.getElementById('create-room-btn').textContent = t('createRoom');
+  document.getElementById('owned-rooms-title').textContent = t('myRooms');
+  document.getElementById('leave-room-btn').textContent = t('leaveRoom');
   document.getElementById('switch-user-btn').textContent = t('switchUser');
   document.getElementById('demands-label').textContent = t('demands');
   document.getElementById('participants-label').textContent = t('participants');
   document.getElementById('demand-input').placeholder = t('demandInputPlaceholder');
   document.getElementById('empty-title').textContent = t('emptyTitle');
   document.getElementById('empty-subtitle').textContent = t('emptySubtitle');
+  document.getElementById('header-room').textContent = formatText(t('roomChip'), { code: appState.roomCode || '----' });
 }
 
 function generateSessionId() {
@@ -880,16 +1017,21 @@ async function fetchState(touch = false) {
     if (touch) params.set('touch', '1');
     params.set('name', myName);
     if (mySessionId) params.set('sessionId', mySessionId);
+    if (currentRoomCode) params.set('roomCode', currentRoomCode);
 
     const res = await fetch(`/api/state?${params.toString()}`);
     if (!res.ok) throw new Error('state request failed');
 
     const data = await res.json();
+    if (data?.error) toast(data.error === 'Room not found' ? t('roomNotFound') : data.error);
     if (data?.participantId) myId = data.participantId;
     if (data?.sessionId) {
       mySessionId = data.sessionId;
       localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
     }
+    currentRoomCode = data?.roomCode || data?.state?.roomCode || '';
+    if (currentRoomCode) localStorage.setItem(STORAGE_ROOM_KEY, currentRoomCode);
+    else localStorage.removeItem(STORAGE_ROOM_KEY);
     if (data?.state) {
       appState = data.state;
       render();
@@ -920,17 +1062,22 @@ async function postAction(obj) {
         ...obj,
         name: myName,
         sessionId: mySessionId,
+        roomCode: currentRoomCode,
       }),
     });
 
     if (!res.ok) throw new Error('action request failed');
     const data = await res.json();
+    if (data?.error) toast(data.error === 'Room not found' ? t('roomNotFound') : data.error);
 
     if (data?.participantId) myId = data.participantId;
     if (data?.sessionId) {
       mySessionId = data.sessionId;
       localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
     }
+    currentRoomCode = data?.roomCode || data?.state?.roomCode || '';
+    if (currentRoomCode) localStorage.setItem(STORAGE_ROOM_KEY, currentRoomCode);
+    else localStorage.removeItem(STORAGE_ROOM_KEY);
     if (data?.state) {
       appState = data.state;
       render();
@@ -953,11 +1100,39 @@ function startSync() {
   stopSync();
   fetchState(true);
   pollTimer = setInterval(() => fetchState(false), 1200);
-  heartbeatTimer = setInterval(() => postAction({ type: 'ping' }), 12000);
+  heartbeatTimer = setInterval(() => {
+    if (currentRoomCode) postAction({ type: 'ping' });
+  }, 12000);
 }
 
 function send(obj) {
+  const allowedWithoutRoom = new Set(['create_room', 'join_room', 'leave_room']);
+  if (!currentRoomCode && !allowedWithoutRoom.has(obj.type)) {
+    toast(t('roomRequired'));
+    return;
+  }
   postAction(obj);
+}
+
+function createRoom() {
+  const roomName = document.getElementById('room-name-input').value.trim();
+  send({ type: 'create_room', roomName });
+  document.getElementById('room-name-input').value = '';
+}
+
+function joinRoomFromInput() {
+  const code = document.getElementById('room-code-input').value.replace(/\D/g, '').slice(0, 4);
+  document.getElementById('room-code-input').value = code;
+  if (!code) return;
+  send({ type: 'join_room', targetRoomCode: code });
+}
+
+function openOwnedRoom(code) {
+  send({ type: 'join_room', targetRoomCode: code });
+}
+
+function leaveRoom() {
+  send({ type: 'leave_room' });
 }
 
 // ─── Join ────────────────────────────────────────────────────────────────────
@@ -970,11 +1145,9 @@ function joinSession() {
   myColor = null;
   myVotes = {};
   myName = name;
-  mySessionId = generateSessionId();
+  mySessionId = mySessionId || generateSessionId();
   localStorage.setItem(STORAGE_NAME_KEY, myName);
   localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
-
-  enterAppScreen();
   startSync();
 }
 
@@ -990,7 +1163,6 @@ function restoreSession() {
   mySessionId = savedSession || generateSessionId();
   localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
   document.getElementById('name-input').value = myName;
-  enterAppScreen();
   startSync();
 }
 
@@ -999,10 +1171,12 @@ function changeUser() {
 
   localStorage.removeItem(STORAGE_NAME_KEY);
   localStorage.removeItem(STORAGE_SESSION_KEY);
+  localStorage.removeItem(STORAGE_ROOM_KEY);
   myId = null;
   myName = null;
   myColor = null;
   mySessionId = null;
+  currentRoomCode = '';
   myVotes = {};
   reconnecting = false;
   appState = {};
@@ -1017,8 +1191,39 @@ document.getElementById('name-input').addEventListener('keydown', e => {
 restoreSession();
 applyI18nStatic();
 
+function renderOwnedRoomsJoin() {
+  const rooms = appState.ownedRooms || [];
+  const wrap = document.getElementById('owned-rooms-wrap');
+  const list = document.getElementById('owned-rooms-list');
+  if (!wrap || !list) return;
+
+  if (!myName) {
+    wrap.style.display = 'none';
+    return;
+  }
+
+  wrap.style.display = 'block';
+  if (!rooms.length) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--c-text3)">${t('noRoomsYet')}</div>`;
+    return;
+  }
+
+  list.innerHTML = rooms.map(room => `
+    <div class="owned-room-item">
+      <div>
+        <div style="font-size:13px;font-weight:700">#${room.code} · ${escHtml(room.name)}</div>
+        <div class="meta">${room.doneDemands}/${room.totalDemands} done</div>
+      </div>
+      <button class="btn-xs" onclick="openOwnedRoom('${room.code}')">${t('enterRoom')}</button>
+    </div>
+  `).join('');
+}
+
 // ─── Render ──────────────────────────────────────────────────────────────────
 function render() {
+  if (myName && appState.roomCode) enterAppScreen();
+  else enterJoinScreen();
+
   const participants = appState.participants || {};
   if (!myId) {
     for (const [id, p] of Object.entries(participants)) {
@@ -1037,6 +1242,10 @@ function render() {
     av.style.background = myColor;
   }
 
+  document.getElementById('header-room').textContent = formatText(t('roomChip'), { code: appState.roomCode || '----' });
+  document.getElementById('leave-room-btn').style.display = appState.roomCode ? 'inline-flex' : 'none';
+  renderOwnedRoomsJoin();
+
   renderDemands();
   renderMain();
   renderParticipants();
@@ -1046,9 +1255,20 @@ function initials(name) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
+function roleText(role) {
+  if (role === 'owner') return t('roleOwner');
+  if (role === 'admin') return t('roleAdmin');
+  return t('roleMember');
+}
+
 function renderDemands() {
   const list = document.getElementById('demand-list');
+  if (!appState.roomCode) {
+    list.innerHTML = '';
+    return;
+  }
   const demands = appState.demands || [];
+  const canManage = !!appState.canManageRoom;
   list.innerHTML = demands.map(d => {
     const isActive = d.id === appState.currentDemandId;
     return `<div class="demand-item ${isActive ? 'active' : ''} ${d.status === 'done' ? 'done' : ''}" onclick="selectDemand('${d.id}')">
@@ -1057,17 +1277,21 @@ function renderDemands() {
         <span class="demand-status status-${d.status}">${t('status')[d.status] || d.status}</span>
         ${d.finalScore !== null ? `<span class="demand-score">${d.finalScore} pts</span>` : ''}
       </div>
-      <div class="demand-actions">
+      ${canManage ? `<div class="demand-actions">
         ${d.status === 'pending' ? `<button class="btn-xs start" onclick="startDemand('${d.id}',event)">${t('startVoting')}</button>` : ''}
         ${d.status === 'done'    ? `<button class="btn-xs" onclick="resetDemand('${d.id}',event)">${t('reestimate')}</button>` : ''}
         <button class="btn-xs danger" onclick="deleteDemand('${d.id}',event)">✕</button>
-      </div>
+      </div>` : ''}
     </div>`;
   }).join('');
 }
 
 function renderParticipants() {
   const list = document.getElementById('participant-list');
+  if (!appState.roomCode) {
+    list.innerHTML = '';
+    return;
+  }
   const participants = appState.participants || {};
   const activeIds = appState.activeParticipantIds || Object.keys(participants).filter(id => participants[id]?.online);
   const roundData = appState.roundData;
@@ -1083,11 +1307,22 @@ function renderParticipants() {
         : `<div class="not-voted-badge" title="${t('waiting')}"></div>`;
     }
     const isMe = id === myId;
+    const canRoles = !!appState.canManageRoles;
+    const canKick = !!appState.canManageRoom;
+    const showSetAdmin = canRoles && p.role === 'member';
+    const showSetMember = canRoles && p.role === 'admin';
+    const showKick = canKick && !isMe && p.role !== 'owner';
     return `<div class="participant-item">
       <div class="avatar" style="background:${p.color}">${initials(p.name)}</div>
       <div>
         <div class="participant-name">${escHtml(p.name)}</div>
+        <div class="role-badge ${p.role || 'member'}">${roleText(p.role)}</div>
         ${isMe ? `<div class="participant-you">${t('you')}</div>` : ''}
+      </div>
+      <div class="participant-actions">
+        ${showSetAdmin ? `<button class="btn-xs" onclick="setRole('${id}','admin')">${t('roleSetAdmin')}</button>` : ''}
+        ${showSetMember ? `<button class="btn-xs" onclick="setRole('${id}','member')">${t('roleSetMember')}</button>` : ''}
+        ${showKick ? `<button class="btn-xs danger" onclick="kickMember('${id}')">${t('kickMember')}</button>` : ''}
       </div>
       ${badge}
     </div>`;
@@ -1096,6 +1331,14 @@ function renderParticipants() {
 
 function renderMain() {
   const main = document.getElementById('main-area');
+  if (!appState.roomCode) {
+    main.innerHTML = `<div class="empty-state">
+      <div class="icon">🧩</div>
+      <h2>${t('myRooms')}</h2>
+      <p>${t('roomRequired')}</p>
+    </div>`;
+    return;
+  }
   const demand = appState.currentDemand;
 
   if (!demand) {
@@ -1121,6 +1364,7 @@ function renderMain() {
 }
 
 function renderPendingView(main, demand) {
+  const canManage = !!appState.canManageRoom;
   main.innerHTML = `
     <div class="voting-header">
       <div class="voting-demand-title">${escHtml(demand.title)}</div>
@@ -1133,7 +1377,7 @@ function renderPendingView(main, demand) {
       </div>
       <div class="round-sub">${t('pendingSub')}</div>
       <div class="action-row">
-        <button class="btn primary" onclick="startDemand('${demand.id}',{stopPropagation:()=>{}})">${t('startVoting')}</button>
+        <button class="btn primary" onclick="startDemand('${demand.id}',{stopPropagation:()=>{}})" ${canManage ? '' : 'disabled'}>${t('startVoting')}</button>
       </div>
     </div>
   `;
@@ -1232,6 +1476,8 @@ function renderVotingView(main, demand) {
 
   const votedActiveCount = activeIds.filter(pid => rd.voterIds.includes(pid)).length;
   const allVoted = activeIds.length > 0 && votedActiveCount >= activeIds.length;
+  const canManage = !!appState.canManageRoom;
+  const canReveal = allVoted || canManage;
   const isLastRound = roundIdx === 2;
 
   main.innerHTML = `
@@ -1256,12 +1502,12 @@ function renderVotingView(main, demand) {
 
       <div class="action-row">
         ${!rd.revealed
-          ? `<button class="btn primary" onclick="revealVotes()" ${allVoted ? '' : 'disabled'}>
+          ? `<button class="btn primary" onclick="revealVotes()" ${canReveal ? '' : 'disabled'}>
               ${t('revealVotes')} ${allVoted ? '' : `(${votedActiveCount}/${activeIds.length})`}
             </button>`
           : isLastRound
-            ? `<button class="btn success" onclick="finishDemand()">${t('finishScore')}</button>`
-            : `<button class="btn primary" onclick="nextRound()">${t('nextRound')}</button>`
+            ? `<button class="btn success" onclick="finishDemand()" ${canManage ? '' : 'disabled'}>${t('finishScore')}</button>`
+            : `<button class="btn primary" onclick="nextRound()" ${canManage ? '' : 'disabled'}>${t('nextRound')}</button>`
         }
       </div>
     </div>
@@ -1319,22 +1565,34 @@ document.getElementById('demand-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') addDemand();
 });
 
+document.getElementById('room-code-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') joinRoomFromInput();
+});
+
+document.getElementById('room-name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createRoom();
+});
+
 function selectDemand(id) {
+  if (!appState.canManageRoom) return;
   send({ type: 'select_demand', demandId: id });
 }
 
 function startDemand(id, e) {
   e.stopPropagation();
+  if (!appState.canManageRoom) return;
   send({ type: 'start_demand', demandId: id });
 }
 
 function deleteDemand(id, e) {
   e.stopPropagation();
+  if (!appState.canManageRoom) return;
   send({ type: 'delete_demand', demandId: id });
 }
 
 function resetDemand(id, e) {
   e.stopPropagation();
+  if (!appState.canManageRoom) return;
   send({ type: 'reset_demand', demandId: id });
 }
 
@@ -1351,8 +1609,16 @@ function castVote(value) {
 }
 
 function revealVotes() { send({ type: 'reveal' }); }
-function nextRound()   { send({ type: 'next_round' }); }
-function finishDemand(){ send({ type: 'finish_demand' }); }
+function nextRound()   { if (appState.canManageRoom) send({ type: 'next_round' }); }
+function finishDemand(){ if (appState.canManageRoom) send({ type: 'finish_demand' }); }
+
+function setRole(targetParticipantId, role) {
+  send({ type: 'set_role', targetParticipantId, role });
+}
+
+function kickMember(targetParticipantId) {
+  send({ type: 'kick_member', targetParticipantId });
+}
 
 // ─── Utils ───────────────────────────────────────────────────────────────────
 function escHtml(s) {

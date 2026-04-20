@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const STATE_KEY = 'planning-poker:state:v1';
+const STATE_KEY = 'planning-poker:state:v2';
 const ACTIVE_MS = 45000;
 
 const ROUND_TYPES = [
@@ -9,7 +9,7 @@ const ROUND_TYPES = [
   { key: 'effort', label: 'How much work effort?', icon: '⚡' },
 ];
 
-const COLORS = ['#7F77DD','#1D9E75','#D85A30','#D4537E','#378ADD','#639922','#BA7517','#E24B4A','#888780'];
+const COLORS = ['#7F77DD', '#1D9E75', '#D85A30', '#D4537E', '#378ADD', '#639922', '#BA7517', '#E24B4A', '#888780'];
 
 function generateId() {
   return crypto.randomBytes(8).toString('hex');
@@ -24,12 +24,22 @@ function sanitizeTitle(title) {
   return String(title || '').trim().slice(0, 80);
 }
 
+function sanitizeRoomName(name) {
+  return String(name || '').trim().slice(0, 40) || 'Planning Room';
+}
+
+function sanitizeRoomCode(code) {
+  return String(code || '').replace(/\D/g, '').slice(0, 4);
+}
+
+function now() {
+  return Date.now();
+}
+
 function defaultState() {
   return {
-    demands: [],
-    participants: {},
-    currentDemandId: null,
-    updatedAt: Date.now(),
+    rooms: {},
+    updatedAt: now(),
   };
 }
 
@@ -62,6 +72,49 @@ function getMemoryState() {
   return globalThis.__PLANNING_POKER_MEMORY_STATE__;
 }
 
+function migrateLegacyState(parsed) {
+  if (parsed && parsed.rooms && typeof parsed.rooms === 'object') {
+    return {
+      rooms: parsed.rooms,
+      updatedAt: Number(parsed.updatedAt) || now(),
+    };
+  }
+
+  if (!parsed || !Array.isArray(parsed.demands)) {
+    return defaultState();
+  }
+
+  const code = '0001';
+  const participants = parsed.participants && typeof parsed.participants === 'object' ? parsed.participants : {};
+  const migratedParticipants = Object.fromEntries(
+    Object.entries(participants).map(([id, p]) => [id, {
+      id,
+      sessionId: p?.sessionId || `legacy-${id}`,
+      name: sanitizeName(p?.name),
+      color: p?.color || COLORS[Object.keys(participants).indexOf(id) % COLORS.length],
+      role: 'member',
+      lastSeen: now(),
+      online: false,
+    }])
+  );
+
+  return {
+    rooms: {
+      [code]: {
+        code,
+        name: 'Legacy Room',
+        ownerSessionId: 'legacy-owner',
+        createdAt: now(),
+        updatedAt: now(),
+        demands: parsed.demands,
+        participants: migratedParticipants,
+        currentDemandId: parsed.currentDemandId || null,
+      },
+    },
+    updatedAt: now(),
+  };
+}
+
 async function loadState() {
   if (!hasKV()) {
     return { state: getMemoryState(), storage: 'memory' };
@@ -76,21 +129,14 @@ async function loadState() {
     }
 
     const parsed = JSON.parse(raw);
-    const state = {
-      demands: Array.isArray(parsed.demands) ? parsed.demands : [],
-      participants: parsed.participants && typeof parsed.participants === 'object' ? parsed.participants : {},
-      currentDemandId: typeof parsed.currentDemandId === 'string' || parsed.currentDemandId === null ? parsed.currentDemandId : null,
-      updatedAt: Number(parsed.updatedAt) || Date.now(),
-    };
-
-    return { state, storage: 'kv' };
+    return { state: migrateLegacyState(parsed), storage: 'kv' };
   } catch {
     return { state: getMemoryState(), storage: 'memory' };
   }
 }
 
 async function saveState(state, storage) {
-  state.updatedAt = Date.now();
+  state.updatedAt = now();
 
   if (storage === 'kv' && hasKV()) {
     await kvCommand(['SET', STATE_KEY, JSON.stringify(state)]);
@@ -100,42 +146,98 @@ async function saveState(state, storage) {
   globalThis.__PLANNING_POKER_MEMORY_STATE__ = state;
 }
 
-function ensureParticipant(state, sessionId, name) {
+function createRoom(state, ownerSessionId, ownerName, roomName) {
+  const code = generateRoomCode(state);
+  const room = {
+    code,
+    name: sanitizeRoomName(roomName),
+    ownerSessionId,
+    createdAt: now(),
+    updatedAt: now(),
+    demands: [],
+    participants: {},
+    currentDemandId: null,
+  };
+  state.rooms[code] = room;
+  const owner = ensureRoomParticipant(room, ownerSessionId, ownerName);
+  owner.role = 'owner';
+  return room;
+}
+
+function generateRoomCode(state) {
+  for (let i = 0; i < 100; i++) {
+    const code = String(1000 + Math.floor(Math.random() * 9000));
+    if (!state.rooms[code]) return code;
+  }
+  throw new Error('Unable to generate room code');
+}
+
+function getRoom(state, roomCode) {
+  const code = sanitizeRoomCode(roomCode);
+  if (!code) return null;
+  return state.rooms[code] || null;
+}
+
+function ensureRoomParticipant(room, sessionId, name) {
   const safeName = sanitizeName(name);
-  let participant = Object.values(state.participants).find(p => p.sessionId === sessionId) || null;
+  let participant = Object.values(room.participants).find(p => p.sessionId === sessionId) || null;
 
   if (!participant) {
     const participantId = generateId();
-    const colorIdx = Object.keys(state.participants).length % COLORS.length;
+    const colorIdx = Object.keys(room.participants).length % COLORS.length;
     participant = {
       id: participantId,
       sessionId,
       name: safeName,
       color: COLORS[colorIdx],
-      lastSeen: Date.now(),
+      role: sessionId === room.ownerSessionId ? 'owner' : 'member',
+      lastSeen: now(),
       online: true,
     };
-    state.participants[participantId] = participant;
+    room.participants[participantId] = participant;
   } else {
     participant.name = safeName;
-    participant.lastSeen = Date.now();
+    participant.lastSeen = now();
     participant.online = true;
+    if (participant.sessionId === room.ownerSessionId) participant.role = 'owner';
   }
 
   return participant;
 }
 
-function refreshPresence(state) {
-  const now = Date.now();
-  for (const participant of Object.values(state.participants)) {
-    participant.online = (now - (participant.lastSeen || 0)) <= ACTIVE_MS;
+function refreshPresence(room) {
+  const ts = now();
+  for (const participant of Object.values(room.participants)) {
+    participant.online = (ts - (participant.lastSeen || 0)) <= ACTIVE_MS;
   }
 }
 
-function getPublicState(state) {
-  refreshPresence(state);
+function getOwnedRooms(state, sessionId) {
+  return Object.values(state.rooms)
+    .filter(room => room.ownerSessionId === sessionId)
+    .map(room => ({
+      code: room.code,
+      name: room.name,
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt,
+      totalDemands: room.demands.length,
+      doneDemands: room.demands.filter(d => d.status === 'done').length,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
-  const currentDemand = state.demands.find(d => d.id === state.currentDemandId) || null;
+function canManageRoom(participant) {
+  return !!participant && (participant.role === 'owner' || participant.role === 'admin');
+}
+
+function canManageRoles(participant) {
+  return !!participant && participant.role === 'owner';
+}
+
+function buildRoomState(room) {
+  refreshPresence(room);
+
+  const currentDemand = room.demands.find(d => d.id === room.currentDemandId) || null;
   let roundData = null;
 
   if (currentDemand && currentDemand.status === 'voting' && currentDemand.currentRound < 3) {
@@ -150,28 +252,59 @@ function getPublicState(state) {
     };
   }
 
-  const participantsPublic = Object.fromEntries(
-    Object.entries(state.participants).map(([id, p]) => [id, {
+  const participants = Object.fromEntries(
+    Object.entries(room.participants).map(([id, p]) => [id, {
       id: p.id,
       name: p.name,
       color: p.color,
+      role: p.role,
       online: !!p.online,
     }])
   );
 
-  const activeParticipantIds = Object.values(state.participants)
+  const activeParticipantIds = Object.values(room.participants)
     .filter(p => p.online)
     .map(p => p.id);
 
   return {
-    type: 'state',
-    demands: state.demands,
-    participants: participantsPublic,
+    demands: room.demands,
+    participants,
     activeParticipantIds,
-    currentDemandId: state.currentDemandId,
+    currentDemandId: room.currentDemandId,
     currentDemand,
     roundData,
+  };
+}
+
+function getPublicState(state, { sessionId, roomCode } = {}) {
+  const ownedRooms = sessionId ? getOwnedRooms(state, sessionId) : [];
+  const room = getRoom(state, roomCode);
+  const roomState = room ? buildRoomState(room) : {
+    demands: [],
+    participants: {},
+    activeParticipantIds: [],
+    currentDemandId: null,
+    currentDemand: null,
+    roundData: null,
+  };
+
+  const me = room ? Object.values(room.participants).find(p => p.sessionId === sessionId) || null : null;
+
+  return {
+    type: 'state',
+    roomCode: room?.code || null,
+    roomName: room?.name || null,
+    demands: roomState.demands,
+    participants: roomState.participants,
+    activeParticipantIds: roomState.activeParticipantIds,
+    currentDemandId: roomState.currentDemandId,
+    currentDemand: roomState.currentDemand,
+    roundData: roomState.roundData,
     roundTypes: ROUND_TYPES,
+    ownedRooms,
+    myRole: me?.role || null,
+    canManageRoom: canManageRoom(me),
+    canManageRoles: canManageRoles(me),
     updatedAt: state.updatedAt,
   };
 }
@@ -184,7 +317,17 @@ function computeFinalScore(demand) {
   return Math.round(roundAvgs.reduce((a, b) => a + b, 0) / roundAvgs.length);
 }
 
-function applyAction(state, participant, action) {
+function removeParticipantVotes(room, participantId) {
+  for (const demand of room.demands) {
+    for (const round of demand.rounds || []) {
+      if (round.votes && Object.prototype.hasOwnProperty.call(round.votes, participantId)) {
+        delete round.votes[participantId];
+      }
+    }
+  }
+}
+
+function applyRoomAction(room, participant, action) {
   switch (action.type) {
     case 'ping':
       return;
@@ -192,7 +335,7 @@ function applyAction(state, participant, action) {
     case 'add_demand': {
       const title = sanitizeTitle(action.title);
       if (!title) return;
-      state.demands.push({
+      room.demands.push({
         id: generateId(),
         title,
         status: 'pending',
@@ -200,75 +343,111 @@ function applyAction(state, participant, action) {
         rounds: ROUND_TYPES.map(() => ({ votes: {}, revealed: false })),
         finalScore: null,
       });
+      room.updatedAt = now();
       return;
     }
 
     case 'select_demand': {
-      const d = state.demands.find(x => x.id === action.demandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === action.demandId);
       if (!d) return;
-      state.currentDemandId = d.id;
+      room.currentDemandId = d.id;
+      room.updatedAt = now();
       return;
     }
 
     case 'start_demand': {
-      const d = state.demands.find(x => x.id === action.demandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === action.demandId);
       if (!d) return;
       d.status = 'voting';
       d.currentRound = 0;
       d.rounds = ROUND_TYPES.map(() => ({ votes: {}, revealed: false }));
       d.finalScore = null;
-      state.currentDemandId = d.id;
+      room.currentDemandId = d.id;
+      room.updatedAt = now();
       return;
     }
 
     case 'vote': {
-      const d = state.demands.find(x => x.id === state.currentDemandId);
+      const d = room.demands.find(x => x.id === room.currentDemandId);
       if (!d || d.status !== 'voting') return;
       const round = d.rounds[d.currentRound];
       if (round.revealed) return;
       round.votes[participant.id] = action.value;
+      room.updatedAt = now();
       return;
     }
 
     case 'reveal': {
-      const d = state.demands.find(x => x.id === state.currentDemandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === room.currentDemandId);
       if (!d || d.status !== 'voting') return;
       d.rounds[d.currentRound].revealed = true;
+      room.updatedAt = now();
       return;
     }
 
     case 'next_round': {
-      const d = state.demands.find(x => x.id === state.currentDemandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === room.currentDemandId);
       if (!d || d.status !== 'voting') return;
       if (d.currentRound < 2) d.currentRound++;
+      room.updatedAt = now();
       return;
     }
 
     case 'finish_demand': {
-      const d = state.demands.find(x => x.id === state.currentDemandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === room.currentDemandId);
       if (!d || d.status !== 'voting') return;
       d.finalScore = computeFinalScore(d);
       d.status = 'done';
-      state.currentDemandId = d.id;
+      room.currentDemandId = d.id;
+      room.updatedAt = now();
       return;
     }
 
     case 'reset_demand': {
-      const d = state.demands.find(x => x.id === action.demandId);
+      if (!canManageRoom(participant)) return;
+      const d = room.demands.find(x => x.id === action.demandId);
       if (!d) return;
       d.status = 'pending';
       d.currentRound = 0;
       d.rounds = ROUND_TYPES.map(() => ({ votes: {}, revealed: false }));
       d.finalScore = null;
-      if (state.currentDemandId === d.id) state.currentDemandId = d.id;
+      room.currentDemandId = d.id;
+      room.updatedAt = now();
       return;
     }
 
     case 'delete_demand': {
-      state.demands = state.demands.filter(x => x.id !== action.demandId);
-      if (state.currentDemandId === action.demandId) {
-        state.currentDemandId = state.demands[0]?.id || null;
+      if (!canManageRoom(participant)) return;
+      room.demands = room.demands.filter(x => x.id !== action.demandId);
+      if (room.currentDemandId === action.demandId) {
+        room.currentDemandId = room.demands[0]?.id || null;
       }
+      room.updatedAt = now();
+      return;
+    }
+
+    case 'set_role': {
+      if (!canManageRoles(participant)) return;
+      const target = room.participants[action.targetParticipantId];
+      const role = action.role === 'admin' ? 'admin' : 'member';
+      if (!target || target.role === 'owner') return;
+      target.role = role;
+      room.updatedAt = now();
+      return;
+    }
+
+    case 'kick_member': {
+      if (!canManageRoom(participant)) return;
+      const target = room.participants[action.targetParticipantId];
+      if (!target || target.role === 'owner') return;
+      delete room.participants[action.targetParticipantId];
+      removeParticipantVotes(room, action.targetParticipantId);
+      room.updatedAt = now();
       return;
     }
 
@@ -305,11 +484,14 @@ function sendJson(res, status, payload) {
 module.exports = {
   loadState,
   saveState,
-  ensureParticipant,
+  createRoom,
+  getRoom,
+  ensureRoomParticipant,
   getPublicState,
-  applyAction,
+  applyRoomAction,
   readJson,
   getQuery,
   sendJson,
   generateId,
+  sanitizeRoomCode,
 };
