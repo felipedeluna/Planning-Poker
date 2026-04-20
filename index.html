@@ -307,6 +307,10 @@
   .demand-item:hover { background: var(--c-surface2); border-color: var(--c-border); }
   .demand-item.active { background: var(--c-surface3); border-color: var(--c-accent); }
   .demand-item.done { opacity: 0.6; }
+  .demand-item.needs-review {
+    border-color: rgba(216,90,48,0.45);
+    background: rgba(216,90,48,0.06);
+  }
   .demand-title {
     font-size: 13px; font-weight: 600; margin-bottom: 4px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -326,6 +330,17 @@
     font-family: var(--mono);
     font-size: 12px; font-weight: 500;
     color: var(--c-teal);
+  }
+  .demand-score.review { color: var(--c-coral); }
+  .review-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: #ffb199;
+    background: rgba(216,90,48,0.18);
+    border: 1px solid rgba(216,90,48,0.5);
+    padding: 2px 7px;
+    border-radius: 20px;
   }
   .demand-actions {
     display: flex; gap: 4px; margin-top: 6px;
@@ -508,6 +523,15 @@
     text-transform: uppercase; letter-spacing: 0.5px;
     margin-top: 4px;
   }
+  .vote-card.high {
+    border-color: rgba(216,90,48,0.35);
+    background: rgba(216,90,48,0.08);
+  }
+  .vote-card.high:hover,
+  .vote-card.high.selected {
+    border-color: var(--c-coral);
+    background: rgba(216,90,48,0.22);
+  }
 
   /* Labels for specific vote values */
   .vote-label { font-size: 8px; color: var(--c-text3); text-align: center; padding: 0 4px; }
@@ -595,6 +619,10 @@
     padding: 20px 28px;
     display: flex; align-items: center; justify-content: space-between;
   }
+  .final-score-banner.review {
+    background: linear-gradient(135deg, rgba(216,90,48,0.2), rgba(186,117,23,0.12));
+    border-color: rgba(216,90,48,0.45);
+  }
   .final-score-label { font-size: 13px; color: var(--c-text2); font-weight: 600; }
   .final-score-value {
     font-family: var(--mono);
@@ -602,6 +630,16 @@
     background: linear-gradient(135deg, #a49ef0, #5DCAA5);
     background-clip: text;
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .review-alert {
+    margin-top: 12px;
+    background: rgba(216,90,48,0.14);
+    border: 1px solid rgba(216,90,48,0.45);
+    border-radius: var(--r2);
+    padding: 10px 12px;
+    color: #ffd5c7;
+    font-size: 12px;
+    font-weight: 600;
   }
 
   /* ─── Sidebar right (participants) ─── */
@@ -688,20 +726,38 @@
     <h1>Planning Poker</h1>
     <p id="join-subtitle">Sprint planning with your team, round by round.</p>
     <input class="join-input" id="name-input" type="text" placeholder="Your name…" maxlength="30" autocomplete="off">
-    <button class="join-btn" id="join-btn" onclick="joinSession()">Join Session →</button>
+    <div class="join-row" style="margin-top:8px">
+      <select class="join-input-sm" id="avatar-input">
+        <option value="🙂">🙂 Smile</option>
+        <option value="🧠">🧠 Brain</option>
+        <option value="🧑‍💻">🧑‍💻 Dev</option>
+        <option value="🚀">🚀 Rocket</option>
+        <option value="🐱">🐱 Cat</option>
+        <option value="🦊">🦊 Fox</option>
+        <option value="🐼">🐼 Panda</option>
+        <option value="🦁">🦁 Lion</option>
+      </select>
+    </div>
 
     <div class="join-row">
       <input class="join-input-sm" id="room-code-input" type="text" placeholder="Room code (4 digits)" maxlength="4" autocomplete="off">
-      <button class="join-btn secondary" id="join-room-btn" onclick="joinRoomFromInput()">Enter</button>
+      <button class="join-btn" id="join-btn" onclick="joinSession()">Enter</button>
     </div>
     <div class="join-row">
       <input class="join-input-sm" id="room-name-input" type="text" placeholder="New room name" maxlength="40" autocomplete="off">
       <button class="join-btn secondary" id="create-room-btn" onclick="createRoom()">Create room</button>
     </div>
 
+    <button class="join-btn secondary" id="reset-browser-btn" onclick="resetBrowserData()" style="width:100%;margin-top:8px">Resetar tudo neste navegador</button>
+
     <div class="owned-rooms" id="owned-rooms-wrap" style="display:none">
       <div class="owned-rooms-title" id="owned-rooms-title">My rooms</div>
       <div id="owned-rooms-list"></div>
+    </div>
+
+    <div class="owned-rooms" id="cred-wrap" style="display:none">
+      <div class="owned-rooms-title" id="cred-title">Credenciais antigas</div>
+      <div id="cred-list"></div>
     </div>
   </div>
 </div>
@@ -725,6 +781,7 @@
         <div class="avatar-sm" id="header-avatar"></div>
         <span id="header-name"></span>
         <button class="switch-user-btn" id="leave-room-btn" onclick="leaveRoom()">Sair da sala</button>
+        <button class="switch-user-btn" id="reset-header-btn" onclick="resetBrowserData()">Resetar tudo</button>
         <button class="switch-user-btn" id="switch-user-btn" onclick="changeUser()">Trocar</button>
       </div>
     </header>
@@ -772,19 +829,18 @@ const VOTE_OPTIONS = [
   { v: 21,   label: '21' },
   { v: 40,   label: '40' },
   { v: 100,  label: '100' },
-  { v: 0,    label: '?' },
 ];
 
 const VOTE_LABELS = {
   pt: {
-    knowledge: { 1:'Muito pouco', 3:'Algum', 5:'Bom', 8:'Bem conhecido', 13:'Totalmente definido' },
-    dependencies: { 0:'Nenhuma', 1:'Poucas', 3:'Várias', 5:'Muitas', 8:'Teia complexa', 13:'Bloqueadores' },
-    effort: { 1:'Trivial', 2:'Fácil', 3:'Pequeno', 5:'Médio', 8:'Grande', 13:'XL', 21:'XXL', 40:'Épico', 100:'Insano' },
+    knowledge: { 1:'Tudo', 2:'Quase tudo', 3:'Algo', 5:'Quase nada', 8:'Nada', 13:'Nada', 21:'Revisar', 40:'Revisar', 100:'Revisar' },
+    dependencies: { 1:'Nenhuma', 2:'Quase nenhuma', 3:'Algumas', 5:'Poucas', 8:'Mais que poucas', 13:'Desconhecidas', 21:'Revisar', 40:'Revisar', 100:'Revisar' },
+    effort: { 1:'Menos de 2 horas', 2:'Meio dia', 3:'Até dois dias', 5:'Poucos dias', 8:'Cerca de 1 semana', 13:'Mais de 1 semana', 21:'Revisar', 40:'Revisar', 100:'Revisar' },
   },
   en: {
-    knowledge: { 1:'Very little', 3:'Some', 5:'Good', 8:'Well known', 13:'Fully defined' },
-    dependencies: { 0:'None', 1:'Few', 3:'Several', 5:'Many', 8:'Complex web', 13:'Blockers' },
-    effort: { 1:'Trivial', 2:'Easy', 3:'Small', 5:'Medium', 8:'Large', 13:'XL', 21:'XXL', 40:'Epic', 100:'Insane' },
+    knowledge: { 1:'Everything', 2:'Almost everything', 3:'Something', 5:'Almost nothing', 8:'Nothing', 13:'Nothing', 21:'Review', 40:'Review', 100:'Review' },
+    dependencies: { 1:'None', 2:'Almost none', 3:'Some', 5:'Few', 8:'More than few', 13:'Unknown', 21:'Review', 40:'Review', 100:'Review' },
+    effort: { 1:'Less than 2 hours', 2:'Half a day', 3:'Up to two days', 5:'Few days', 8:'Around a week', 13:'More than one week', 21:'Review', 40:'Review', 100:'Review' },
   }
 };
 
@@ -792,16 +848,23 @@ const STORAGE_NAME_KEY = 'pp_name';
 const STORAGE_SESSION_KEY = 'pp_session_id';
 const STORAGE_LANG_KEY = 'pp_lang';
 const STORAGE_ROOM_KEY = 'pp_room_code';
+const STORAGE_CREDENTIALS_KEY = 'pp_credentials';
+const STORAGE_ACTIVE_CREDENTIAL_KEY = 'pp_active_credential';
 
 const I18N = {
   pt: {
     joinSubtitle: 'Planejamento de sprint com o time, rodada por rodada.',
     namePlaceholder: 'Seu nome…',
-    joinBtn: 'Entrar na sessão →',
+    joinBtn: 'Entrar na sala',
     roomCodePlaceholder: 'Código da sala (4 dígitos)',
     roomNamePlaceholder: 'Nome da nova sala',
     createRoom: 'Criar sala',
     enterRoom: 'Entrar',
+    oldCreds: 'Credenciais antigas',
+    loginAs: 'Entrar como',
+    deleteCred: 'Excluir login',
+    resetAll: 'Resetar tudo neste navegador',
+    chooseAvatar: 'Selecione um avatar',
     myRooms: 'Minhas salas',
     roomChip: 'Sala: {code}',
     leaveRoom: 'Sair da sala',
@@ -821,6 +884,9 @@ const I18N = {
     finishScore: '✓ Finalizar e Pontuar',
     nextRound: 'Próxima Rodada →',
     finalScore: 'Pontuação Final',
+    reviewRequired: 'Revisão necessária',
+    reviewHint: 'Pontuação acima de 13. Quebre a demanda ou refine o escopo antes de seguir.',
+    reviewBadge: 'Revisar',
     reestimate: '↺ Reestimar',
     roundOf: 'Rodada {n} de 3 · {key}',
     roundTitle: 'Rodada {n}: {label}',
@@ -836,6 +902,7 @@ const I18N = {
     roleSetMember: 'Tornar membro',
     kickMember: 'Remover',
     noRoomsYet: 'Você ainda não possui salas criadas',
+    noCredsYet: 'Nenhuma credencial antiga neste navegador',
     status: { pending: 'pendente', voting: 'votando', done: 'concluída' },
     rounds: {
       knowledge: 'Quanto é conhecido sobre a tarefa?',
@@ -864,11 +931,16 @@ const I18N = {
   en: {
     joinSubtitle: 'Sprint planning with your team, round by round.',
     namePlaceholder: 'Your name…',
-    joinBtn: 'Join Session →',
+    joinBtn: 'Enter room',
     roomCodePlaceholder: 'Room code (4 digits)',
     roomNamePlaceholder: 'New room name',
     createRoom: 'Create room',
     enterRoom: 'Enter',
+    oldCreds: 'Old credentials',
+    loginAs: 'Login as',
+    deleteCred: 'Delete login',
+    resetAll: 'Reset all on this browser',
+    chooseAvatar: 'Choose an avatar',
     myRooms: 'My rooms',
     roomChip: 'Room: {code}',
     leaveRoom: 'Leave room',
@@ -888,6 +960,9 @@ const I18N = {
     finishScore: '✓ Finish & Score',
     nextRound: 'Next Round →',
     finalScore: 'Final Score',
+    reviewRequired: 'Review required',
+    reviewHint: 'Score above 13. Split the demand or refine scope before moving forward.',
+    reviewBadge: 'Review',
     reestimate: '↺ Re-estimate',
     roundOf: 'Round {n} of 3 · {key}',
     roundTitle: 'Round {n}: {label}',
@@ -903,6 +978,7 @@ const I18N = {
     roleSetMember: 'Set member',
     kickMember: 'Remove',
     noRoomsYet: 'You have no rooms created yet',
+    noCredsYet: 'No old credentials in this browser',
     status: { pending: 'pending', voting: 'voting', done: 'done' },
     rounds: {
       knowledge: 'How much is known about the task?',
@@ -930,7 +1006,7 @@ const I18N = {
   }
 };
 
-let myId, myName, myColor, mySessionId;
+let myId, myName, myColor, mySessionId, myAvatar = '🙂';
 let currentRoomCode = localStorage.getItem(STORAGE_ROOM_KEY) || '';
 let appState = {};
 let myVotes = {}; // demandId+roundIdx → value
@@ -940,6 +1016,60 @@ let syncingNow = false;
 let reconnecting = false;
 let reconnectToastAt = 0;
 let currentLang = localStorage.getItem(STORAGE_LANG_KEY) || 'pt';
+
+function loadCredentials() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_CREDENTIALS_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCredentials(credentials) {
+  localStorage.setItem(STORAGE_CREDENTIALS_KEY, JSON.stringify(credentials));
+}
+
+function getActiveCredential() {
+  const activeId = localStorage.getItem(STORAGE_ACTIVE_CREDENTIAL_KEY);
+  if (!activeId) return null;
+  const credentials = loadCredentials();
+  return credentials.find(c => c.id === activeId && !c.deleted) || null;
+}
+
+function setActiveCredential(cred) {
+  localStorage.setItem(STORAGE_ACTIVE_CREDENTIAL_KEY, cred.id);
+  myName = cred.name;
+  mySessionId = cred.sessionId;
+  myAvatar = cred.avatar || '🙂';
+  localStorage.setItem(STORAGE_NAME_KEY, myName);
+  localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
+}
+
+function upsertCredential({ name, sessionId, avatar }) {
+  const credentials = loadCredentials();
+  let cred = credentials.find(c => c.sessionId === sessionId);
+  if (!cred) {
+    cred = {
+      id: generateSessionId(),
+      sessionId,
+      name,
+      avatar: avatar || '🙂',
+      deleted: false,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+    };
+    credentials.unshift(cred);
+  } else {
+    cred.name = name;
+    cred.avatar = avatar || cred.avatar || '🙂';
+    cred.deleted = false;
+    cred.lastUsedAt = Date.now();
+  }
+  saveCredentials(credentials);
+  setActiveCredential(cred);
+  return cred;
+}
 
 function t(key) {
   return I18N[currentLang]?.[key] ?? I18N.en[key] ?? key;
@@ -962,11 +1092,16 @@ function applyI18nStatic() {
   if (langSelect) langSelect.value = currentLang;
   document.getElementById('join-subtitle').textContent = t('joinSubtitle');
   document.getElementById('name-input').placeholder = t('namePlaceholder');
+  document.getElementById('avatar-input').title = t('chooseAvatar');
   document.getElementById('join-btn').textContent = t('joinBtn');
   document.getElementById('room-code-input').placeholder = t('roomCodePlaceholder');
   document.getElementById('room-name-input').placeholder = t('roomNamePlaceholder');
-  document.getElementById('join-room-btn').textContent = t('enterRoom');
+  const joinRoomBtn = document.getElementById('join-room-btn');
+  if (joinRoomBtn) joinRoomBtn.textContent = t('enterRoom');
   document.getElementById('create-room-btn').textContent = t('createRoom');
+  document.getElementById('cred-title').textContent = t('oldCreds');
+  document.getElementById('reset-browser-btn').textContent = t('resetAll');
+  document.getElementById('reset-header-btn').textContent = t('resetAll');
   document.getElementById('owned-rooms-title').textContent = t('myRooms');
   document.getElementById('leave-room-btn').textContent = t('leaveRoom');
   document.getElementById('switch-user-btn').textContent = t('switchUser');
@@ -1016,6 +1151,7 @@ async function fetchState(touch = false) {
     const params = new URLSearchParams();
     if (touch) params.set('touch', '1');
     params.set('name', myName);
+    params.set('avatar', myAvatar || '🙂');
     if (mySessionId) params.set('sessionId', mySessionId);
     if (currentRoomCode) params.set('roomCode', currentRoomCode);
 
@@ -1031,7 +1167,10 @@ async function fetchState(touch = false) {
     }
     currentRoomCode = data?.roomCode || data?.state?.roomCode || '';
     if (currentRoomCode) localStorage.setItem(STORAGE_ROOM_KEY, currentRoomCode);
-    else localStorage.removeItem(STORAGE_ROOM_KEY);
+    else {
+      localStorage.removeItem(STORAGE_ROOM_KEY);
+      myId = null;
+    }
     if (data?.state) {
       appState = data.state;
       render();
@@ -1061,6 +1200,7 @@ async function postAction(obj) {
       body: JSON.stringify({
         ...obj,
         name: myName,
+        avatar: myAvatar || '🙂',
         sessionId: mySessionId,
         roomCode: currentRoomCode,
       }),
@@ -1077,7 +1217,10 @@ async function postAction(obj) {
     }
     currentRoomCode = data?.roomCode || data?.state?.roomCode || '';
     if (currentRoomCode) localStorage.setItem(STORAGE_ROOM_KEY, currentRoomCode);
-    else localStorage.removeItem(STORAGE_ROOM_KEY);
+    else {
+      localStorage.removeItem(STORAGE_ROOM_KEY);
+      myId = null;
+    }
     if (data?.state) {
       appState = data.state;
       render();
@@ -1114,7 +1257,80 @@ function send(obj) {
   postAction(obj);
 }
 
+function activateCredentialAndSync(cred) {
+  setActiveCredential(cred);
+  currentRoomCode = '';
+  localStorage.removeItem(STORAGE_ROOM_KEY);
+  stopSync();
+  myId = null;
+  myColor = null;
+  myVotes = {};
+  startSync();
+}
+
+function ensureCredentialFromInputs() {
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) { toast(t('enterName')); return null; }
+  const avatar = document.getElementById('avatar-input').value || '🙂';
+  const sameActive = mySessionId && myName && myName === name;
+  const sessionId = sameActive ? mySessionId : generateSessionId();
+  const cred = upsertCredential({ name, sessionId, avatar });
+  activateCredentialAndSync(cred);
+  return cred;
+}
+
+function renderCredentialList() {
+  const wrap = document.getElementById('cred-wrap');
+  const list = document.getElementById('cred-list');
+  if (!wrap || !list) return;
+
+  const creds = loadCredentials().filter(c => !c.deleted);
+  if (!creds.length) {
+    wrap.style.display = 'block';
+    list.innerHTML = `<div style="font-size:12px;color:var(--c-text3)">${t('noCredsYet')}</div>`;
+    return;
+  }
+
+  wrap.style.display = 'block';
+  list.innerHTML = creds.map(c => `
+    <div class="owned-room-item">
+      <div>
+        <div style="font-size:13px;font-weight:700">${c.avatar || '🙂'} ${escHtml(c.name)}</div>
+        <div class="meta">${t('loginAs')}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-xs" onclick="loginWithCredential('${c.id}')">${t('enterRoom')}</button>
+        <button class="btn-xs danger" onclick="deleteCredential('${c.id}')">${t('deleteCred')}</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function loginWithCredential(id) {
+  const cred = loadCredentials().find(c => c.id === id && !c.deleted);
+  if (!cred) return;
+  activateCredentialAndSync(cred);
+  document.getElementById('name-input').value = cred.name;
+  document.getElementById('avatar-input').value = cred.avatar || '🙂';
+}
+
+function deleteCredential(id) {
+  const credentials = loadCredentials();
+  const cred = credentials.find(c => c.id === id);
+  if (!cred) return;
+  cred.deleted = true;
+  saveCredentials(credentials);
+  if (localStorage.getItem(STORAGE_ACTIVE_CREDENTIAL_KEY) === id) {
+    localStorage.removeItem(STORAGE_ACTIVE_CREDENTIAL_KEY);
+    changeUser();
+  }
+  renderCredentialList();
+}
+
 function createRoom() {
+  if (!myName || !mySessionId) {
+    if (!ensureCredentialFromInputs()) return;
+  }
   const roomName = document.getElementById('room-name-input').value.trim();
   send({ type: 'create_room', roomName });
   document.getElementById('room-name-input').value = '';
@@ -1124,6 +1340,9 @@ function joinRoomFromInput() {
   const code = document.getElementById('room-code-input').value.replace(/\D/g, '').slice(0, 4);
   document.getElementById('room-code-input').value = code;
   if (!code) return;
+  if (!myName || !mySessionId) {
+    if (!ensureCredentialFromInputs()) return;
+  }
   send({ type: 'join_room', targetRoomCode: code });
 }
 
@@ -1137,32 +1356,27 @@ function leaveRoom() {
 
 // ─── Join ────────────────────────────────────────────────────────────────────
 function joinSession() {
-  const name = document.getElementById('name-input').value.trim();
-  if (!name) { toast(t('enterName')); return; }
+  const code = document.getElementById('room-code-input').value.replace(/\D/g, '').slice(0, 4);
+  document.getElementById('room-code-input').value = code;
+  if (!code) { toast(t('roomRequired')); return; }
 
-  stopSync();
-  myId = null;
-  myColor = null;
-  myVotes = {};
-  myName = name;
-  mySessionId = mySessionId || generateSessionId();
-  localStorage.setItem(STORAGE_NAME_KEY, myName);
-  localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
-  startSync();
+  if (!myName || !mySessionId) {
+    if (!ensureCredentialFromInputs()) return;
+  }
+  send({ type: 'join_room', targetRoomCode: code });
 }
 
 function restoreSession() {
-  const savedName = localStorage.getItem(STORAGE_NAME_KEY);
-  const savedSession = localStorage.getItem(STORAGE_SESSION_KEY);
-  if (!savedName) {
+  const active = getActiveCredential();
+  if (!active) {
     enterJoinScreen();
+    renderCredentialList();
     return;
   }
 
-  myName = savedName;
-  mySessionId = savedSession || generateSessionId();
-  localStorage.setItem(STORAGE_SESSION_KEY, mySessionId);
+  setActiveCredential(active);
   document.getElementById('name-input').value = myName;
+  document.getElementById('avatar-input').value = myAvatar || '🙂';
   startSync();
 }
 
@@ -1176,12 +1390,39 @@ function changeUser() {
   myName = null;
   myColor = null;
   mySessionId = null;
+  myAvatar = '🙂';
   currentRoomCode = '';
   myVotes = {};
   reconnecting = false;
   appState = {};
   document.getElementById('name-input').value = '';
+  document.getElementById('avatar-input').value = '🙂';
+  localStorage.removeItem(STORAGE_ACTIVE_CREDENTIAL_KEY);
   enterJoinScreen();
+  renderCredentialList();
+}
+
+function resetBrowserData() {
+  stopSync();
+  myId = null;
+  myColor = null;
+  myVotes = {};
+  appState = {};
+  myName = null;
+  mySessionId = null;
+  myAvatar = '🙂';
+  currentRoomCode = '';
+  reconnecting = false;
+  localStorage.removeItem(STORAGE_ACTIVE_CREDENTIAL_KEY);
+  localStorage.removeItem(STORAGE_NAME_KEY);
+  localStorage.removeItem(STORAGE_SESSION_KEY);
+  localStorage.removeItem(STORAGE_ROOM_KEY);
+  document.getElementById('name-input').value = '';
+  document.getElementById('room-code-input').value = '';
+  document.getElementById('room-name-input').value = '';
+  document.getElementById('avatar-input').value = '🙂';
+  enterJoinScreen();
+  renderCredentialList();
 }
 
 document.getElementById('name-input').addEventListener('keydown', e => {
@@ -1225,25 +1466,18 @@ function render() {
   else enterJoinScreen();
 
   const participants = appState.participants || {};
-  if (!myId) {
-    for (const [id, p] of Object.entries(participants)) {
-      if (p.name === myName && p.online) {
-        myId = id;
-        break;
-      }
-    }
-  }
-
   const me = myId ? participants[myId] : null;
   if (me) {
     myColor = me.color;
+    myAvatar = me.avatar || myAvatar;
     const av = document.getElementById('header-avatar');
-    av.textContent = initials(me.name);
+    av.textContent = me.avatar || '🙂';
     av.style.background = myColor;
   }
 
   document.getElementById('header-room').textContent = formatText(t('roomChip'), { code: appState.roomCode || '----' });
   document.getElementById('leave-room-btn').style.display = appState.roomCode ? 'inline-flex' : 'none';
+  renderCredentialList();
   renderOwnedRoomsJoin();
 
   renderDemands();
@@ -1255,10 +1489,18 @@ function initials(name) {
   return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
+function participantAvatar(p) {
+  return p?.avatar || '🙂';
+}
+
 function roleText(role) {
   if (role === 'owner') return t('roleOwner');
   if (role === 'admin') return t('roleAdmin');
   return t('roleMember');
+}
+
+function demandNeedsReview(demand) {
+  return !!demand && (demand.requiresReview === true || Number(demand.finalScore) > 13);
 }
 
 function renderDemands() {
@@ -1271,11 +1513,13 @@ function renderDemands() {
   const canManage = !!appState.canManageRoom;
   list.innerHTML = demands.map(d => {
     const isActive = d.id === appState.currentDemandId;
-    return `<div class="demand-item ${isActive ? 'active' : ''} ${d.status === 'done' ? 'done' : ''}" onclick="selectDemand('${d.id}')">
+    const needsReview = demandNeedsReview(d);
+    return `<div class="demand-item ${isActive ? 'active' : ''} ${d.status === 'done' ? 'done' : ''} ${needsReview ? 'needs-review' : ''}" onclick="selectDemand('${d.id}')">
       <div class="demand-title">${escHtml(d.title)}</div>
       <div class="demand-meta">
         <span class="demand-status status-${d.status}">${t('status')[d.status] || d.status}</span>
-        ${d.finalScore !== null ? `<span class="demand-score">${d.finalScore} pts</span>` : ''}
+        ${needsReview ? `<span class="review-badge">${t('reviewBadge')}</span>` : ''}
+        ${d.finalScore !== null ? `<span class="demand-score ${needsReview ? 'review' : ''}">${d.finalScore} pts</span>` : ''}
       </div>
       ${canManage ? `<div class="demand-actions">
         ${d.status === 'pending' ? `<button class="btn-xs start" onclick="startDemand('${d.id}',event)">${t('startVoting')}</button>` : ''}
@@ -1313,7 +1557,7 @@ function renderParticipants() {
     const showSetMember = canRoles && p.role === 'admin';
     const showKick = canKick && !isMe && p.role !== 'owner';
     return `<div class="participant-item">
-      <div class="avatar" style="background:${p.color}">${initials(p.name)}</div>
+      <div class="avatar" style="background:${p.color}">${participantAvatar(p)}</div>
       <div>
         <div class="participant-name">${escHtml(p.name)}</div>
         <div class="role-badge ${p.role || 'member'}">${roleText(p.role)}</div>
@@ -1452,7 +1696,8 @@ function renderVotingView(main, demand) {
   const voteOptions = getVoteOptions(rd.key);
   const voteCardsHtml = voteOptions.map(opt => {
     const lbl = (VOTE_LABELS[currentLang]?.[rd.key] || {})[opt.v] || '';
-    return `<div class="vote-card ${myVote == opt.v && !rd.revealed ? 'selected' : ''}"
+    const isHigh = opt.v > 13;
+    return `<div class="vote-card ${isHigh ? 'high' : ''} ${myVote == opt.v && !rd.revealed ? 'selected' : ''}"
       onclick="castVote(${opt.v})">
       <span>${opt.label}</span>
       ${lbl ? `<span class="vote-label">${lbl}</span>` : ''}
@@ -1468,7 +1713,7 @@ function renderVotingView(main, demand) {
     const hasVoted = rd.voterIds.includes(pid);
     const val = rd.revealed ? (rd.votes[pid] ?? '–') : (hasVoted ? '✓' : '…');
     return `<div class="voter-chip ${hasVoted ? '' : 'pending'}">
-      <div class="avatar-sm" style="width:22px;height:22px;background:${p.color};font-size:9px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:white;font-weight:700">${initials(p.name)}</div>
+      <div class="avatar-sm" style="width:22px;height:22px;background:${p.color};font-size:11px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:white;font-weight:700">${participantAvatar(p)}</div>
       <span>${p.name.split(' ')[0]}</span>
       <span class="val" style="color:${rd.revealed ? '#a49ef0' : 'inherit'}">${val}</span>
     </div>`;
@@ -1516,6 +1761,7 @@ function renderVotingView(main, demand) {
 
 function renderDoneView(main, demand) {
   const rtypes = appState.roundTypes;
+  const needsReview = demandNeedsReview(demand);
   const roundsHtml = demand.rounds.map((r, i) => {
     const vals = Object.values(r.votes).map(Number).filter(n => !isNaN(n));
     const avg  = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : '–';
@@ -1531,13 +1777,14 @@ function renderDoneView(main, demand) {
   }).join('');
 
   main.innerHTML = `
-    <div class="final-score-banner">
+    <div class="final-score-banner ${needsReview ? 'review' : ''}">
       <div>
         <div class="final-score-label">${t('finalScore')}</div>
         <div style="font-size:14px;color:var(--c-text2);margin-top:2px">${escHtml(demand.title)}</div>
       </div>
       <div class="final-score-value">${demand.finalScore}</div>
     </div>
+    ${needsReview ? `<div class="review-alert">⚠ ${t('reviewRequired')}: ${t('reviewHint')}</div>` : ''}
     <div class="results-grid">${roundsHtml}</div>
     <div style="display:flex;gap:10px;margin-top:4px">
       <button class="btn" onclick="resetDemand('${demand.id}',{stopPropagation:()=>{}})">${t('reestimate')}</button>
@@ -1546,9 +1793,6 @@ function renderDoneView(main, demand) {
 }
 
 function getVoteOptions(roundKey) {
-  if (roundKey === 'dependencies') {
-    return [{v:0,label:'0'},{v:1,label:'1'},{v:2,label:'2'},{v:3,label:'3'},{v:5,label:'5'},{v:8,label:'8'},{v:13,label:'13'}];
-  }
   return VOTE_OPTIONS;
 }
 

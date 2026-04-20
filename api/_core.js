@@ -20,6 +20,11 @@ function sanitizeName(name) {
   return n || 'Anonymous';
 }
 
+function sanitizeAvatar(avatar) {
+  const a = String(avatar || '').trim();
+  return a || '🙂';
+}
+
 function sanitizeTitle(title) {
   return String(title || '').trim().slice(0, 80);
 }
@@ -146,7 +151,7 @@ async function saveState(state, storage) {
   globalThis.__PLANNING_POKER_MEMORY_STATE__ = state;
 }
 
-function createRoom(state, ownerSessionId, ownerName, roomName) {
+function createRoom(state, ownerSessionId, ownerName, ownerAvatar, roomName) {
   const code = generateRoomCode(state);
   const room = {
     code,
@@ -159,7 +164,7 @@ function createRoom(state, ownerSessionId, ownerName, roomName) {
     currentDemandId: null,
   };
   state.rooms[code] = room;
-  const owner = ensureRoomParticipant(room, ownerSessionId, ownerName);
+  const owner = ensureRoomParticipant(room, ownerSessionId, ownerName, ownerAvatar);
   owner.role = 'owner';
   return room;
 }
@@ -178,8 +183,9 @@ function getRoom(state, roomCode) {
   return state.rooms[code] || null;
 }
 
-function ensureRoomParticipant(room, sessionId, name) {
+function ensureRoomParticipant(room, sessionId, name, avatar) {
   const safeName = sanitizeName(name);
+  const safeAvatar = sanitizeAvatar(avatar);
   let participant = Object.values(room.participants).find(p => p.sessionId === sessionId) || null;
 
   if (!participant) {
@@ -189,6 +195,7 @@ function ensureRoomParticipant(room, sessionId, name) {
       id: participantId,
       sessionId,
       name: safeName,
+      avatar: safeAvatar,
       color: COLORS[colorIdx],
       role: sessionId === room.ownerSessionId ? 'owner' : 'member',
       lastSeen: now(),
@@ -197,6 +204,7 @@ function ensureRoomParticipant(room, sessionId, name) {
     room.participants[participantId] = participant;
   } else {
     participant.name = safeName;
+    participant.avatar = safeAvatar;
     participant.lastSeen = now();
     participant.online = true;
     if (participant.sessionId === room.ownerSessionId) participant.role = 'owner';
@@ -256,6 +264,7 @@ function buildRoomState(room) {
     Object.entries(room.participants).map(([id, p]) => [id, {
       id: p.id,
       name: p.name,
+      avatar: p.avatar || '🙂',
       color: p.color,
       role: p.role,
       online: !!p.online,
@@ -317,6 +326,10 @@ function computeFinalScore(demand) {
   return Math.round(roundAvgs.reduce((a, b) => a + b, 0) / roundAvgs.length);
 }
 
+function needsReview(demand) {
+  return Number(demand?.finalScore) > 13;
+}
+
 function removeParticipantVotes(room, participantId) {
   for (const demand of room.demands) {
     for (const round of demand.rounds || []) {
@@ -342,6 +355,7 @@ function applyRoomAction(room, participant, action) {
         currentRound: 0,
         rounds: ROUND_TYPES.map(() => ({ votes: {}, revealed: false })),
         finalScore: null,
+        requiresReview: false,
       });
       room.updatedAt = now();
       return;
@@ -364,6 +378,7 @@ function applyRoomAction(room, participant, action) {
       d.currentRound = 0;
       d.rounds = ROUND_TYPES.map(() => ({ votes: {}, revealed: false }));
       d.finalScore = null;
+      d.requiresReview = false;
       room.currentDemandId = d.id;
       room.updatedAt = now();
       return;
@@ -402,6 +417,7 @@ function applyRoomAction(room, participant, action) {
       const d = room.demands.find(x => x.id === room.currentDemandId);
       if (!d || d.status !== 'voting') return;
       d.finalScore = computeFinalScore(d);
+      d.requiresReview = needsReview(d);
       d.status = 'done';
       room.currentDemandId = d.id;
       room.updatedAt = now();
@@ -416,6 +432,7 @@ function applyRoomAction(room, participant, action) {
       d.currentRound = 0;
       d.rounds = ROUND_TYPES.map(() => ({ votes: {}, revealed: false }));
       d.finalScore = null;
+      d.requiresReview = false;
       room.currentDemandId = d.id;
       room.updatedAt = now();
       return;

@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
   const roomCode = sanitizeRoomCode(query.roomCode);
   let sessionId = String(query.sessionId || '').trim();
   const name = String(query.name || '').trim();
+  const avatar = String(query.avatar || '').trim() || '🙂';
   let participant = null;
   let error = null;
 
@@ -32,7 +33,7 @@ module.exports = async (req, res) => {
     error = 'Room not found';
   } else if (touch && room && name) {
     if (!sessionId) sessionId = generateId();
-    participant = ensureRoomParticipant(room, sessionId, name);
+    participant = ensureRoomParticipant(room, sessionId, name, avatar);
     await saveState(state, storage);
   }
 

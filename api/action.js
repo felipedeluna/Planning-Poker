@@ -20,6 +20,7 @@ module.exports = async (req, res) => {
 
   const body = await readJson(req);
   const name = String(body.name || '').trim();
+  const avatar = String(body.avatar || '').trim() || '🙂';
   if (!name) {
     sendJson(res, 400, { ok: false, error: 'Name is required' });
     return;
@@ -30,14 +31,14 @@ module.exports = async (req, res) => {
   const sessionId = String(body.sessionId || '').trim() || generateId();
   const roomCode = sanitizeRoomCode(body.roomCode);
   let room = getRoom(state, roomCode);
-  let participant = room ? ensureRoomParticipant(room, sessionId, name) : null;
+  let participant = room ? ensureRoomParticipant(room, sessionId, name, avatar) : null;
   let currentRoomCode = room?.code || null;
   let error = null;
 
   switch (body.type) {
     case 'create_room': {
-      room = createRoom(state, sessionId, name, body.roomName);
-      participant = ensureRoomParticipant(room, sessionId, name);
+      room = createRoom(state, sessionId, name, avatar, body.roomName);
+      participant = ensureRoomParticipant(room, sessionId, name, avatar);
       currentRoomCode = room.code;
       break;
     }
@@ -48,7 +49,7 @@ module.exports = async (req, res) => {
         error = 'Room not found';
       } else {
         room = targetRoom;
-        participant = ensureRoomParticipant(room, sessionId, name);
+        participant = ensureRoomParticipant(room, sessionId, name, avatar);
         currentRoomCode = room.code;
       }
       break;
