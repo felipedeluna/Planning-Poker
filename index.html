@@ -778,8 +778,10 @@
           <option value="en">EN</option>
         </select>
         <span class="room-chip" id="header-room">Room: ----</span>
+        <button class="switch-user-btn" id="share-room-btn" onclick="shareCurrentRoom()" style="display:none">Compartilhar sala</button>
         <div class="avatar-sm" id="header-avatar"></div>
         <span id="header-name"></span>
+        <button class="switch-user-btn" id="delete-room-btn" onclick="deleteCurrentRoom()" style="display:none">Excluir sala</button>
         <button class="switch-user-btn" id="leave-room-btn" onclick="leaveRoom()">Sair da sala</button>
         <button class="switch-user-btn" id="reset-header-btn" onclick="resetBrowserData()">Resetar tudo</button>
         <button class="switch-user-btn" id="switch-user-btn" onclick="changeUser()">Trocar</button>
@@ -867,7 +869,13 @@ const I18N = {
     chooseAvatar: 'Selecione um avatar',
     myRooms: 'Minhas salas',
     roomChip: 'Sala: {code}',
+    shareRoom: 'Compartilhar sala',
+    shareCopied: 'Link da sala copiado',
+    shareCopyFailed: 'Não foi possível copiar o link',
+    inviteDetected: 'Convite detectado para a sala {code}',
     leaveRoom: 'Sair da sala',
+    deleteRoom: 'Excluir sala',
+    deleteRoomConfirm: 'Tem certeza que deseja excluir esta sala? Esta ação não pode ser desfeita.',
     roomRequired: 'Você precisa estar em uma sala',
     roomNotFound: 'Sala não encontrada',
     removedFromRoom: 'Você foi removido da sala',
@@ -944,7 +952,13 @@ const I18N = {
     chooseAvatar: 'Choose an avatar',
     myRooms: 'My rooms',
     roomChip: 'Room: {code}',
+    shareRoom: 'Share room',
+    shareCopied: 'Room link copied',
+    shareCopyFailed: 'Unable to copy room link',
+    inviteDetected: 'Invite detected for room {code}',
     leaveRoom: 'Leave room',
+    deleteRoom: 'Delete room',
+    deleteRoomConfirm: 'Are you sure you want to delete this room? This action cannot be undone.',
     roomRequired: 'You need to be in a room',
     roomNotFound: 'Room not found',
     removedFromRoom: 'You were removed from the room',
@@ -1018,6 +1032,24 @@ let syncingNow = false;
 let reconnecting = false;
 let reconnectToastAt = 0;
 let currentLang = localStorage.getItem(STORAGE_LANG_KEY) || 'pt';
+let deepLinkRoomCode = '';
+
+function sanitizeRoomCodeLocal(code) {
+  return String(code || '').replace(/\D/g, '').slice(0, 4);
+}
+
+function readDeepLinkRoomCode() {
+  const url = new URL(window.location.href);
+  return sanitizeRoomCodeLocal(url.searchParams.get('room'));
+}
+
+function buildRoomShareUrl(roomCode) {
+  const code = sanitizeRoomCodeLocal(roomCode);
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set('room', code);
+  else url.searchParams.delete('room');
+  return url.toString();
+}
 
 function loadCredentials() {
   try {
@@ -1105,6 +1137,10 @@ function applyI18nStatic() {
   document.getElementById('reset-browser-btn').textContent = t('resetAll');
   document.getElementById('reset-header-btn').textContent = t('resetAll');
   document.getElementById('owned-rooms-title').textContent = t('myRooms');
+  const shareRoomBtn = document.getElementById('share-room-btn');
+  if (shareRoomBtn) shareRoomBtn.textContent = t('shareRoom');
+  const deleteRoomBtn = document.getElementById('delete-room-btn');
+  if (deleteRoomBtn) deleteRoomBtn.textContent = t('deleteRoom');
   document.getElementById('leave-room-btn').textContent = t('leaveRoom');
   document.getElementById('switch-user-btn').textContent = t('switchUser');
   document.getElementById('demands-label').textContent = t('demands');
@@ -1135,6 +1171,36 @@ function enterJoinScreen() {
   const av = document.getElementById('header-avatar');
   av.textContent = '';
   av.style.background = 'transparent';
+}
+
+async function shareRoomLink(code) {
+  const roomCode = sanitizeRoomCodeLocal(code);
+  if (!roomCode) return;
+  const link = buildRoomShareUrl(roomCode);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(link);
+      toast(t('shareCopied'));
+      return;
+    }
+    throw new Error('clipboard-not-available');
+  } catch {
+    try {
+      const input = document.createElement('input');
+      input.value = link;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      toast(t('shareCopied'));
+    } catch {
+      toast(t('shareCopyFailed'));
+    }
+  }
+}
+
+function shareCurrentRoom() {
+  shareRoomLink(appState.roomCode || currentRoomCode);
 }
 
 function stopSync() {
@@ -1265,7 +1331,7 @@ function startSync() {
 }
 
 function send(obj) {
-  const allowedWithoutRoom = new Set(['create_room', 'join_room', 'leave_room']);
+  const allowedWithoutRoom = new Set(['create_room', 'join_room', 'leave_room', 'delete_room']);
   if (!currentRoomCode && !allowedWithoutRoom.has(obj.type)) {
     toast(t('roomRequired'));
     return;
@@ -1328,6 +1394,10 @@ function loginWithCredential(id) {
   activateCredentialAndSync(cred);
   document.getElementById('name-input').value = cred.name;
   document.getElementById('avatar-input').value = cred.avatar || '🙂';
+  if (deepLinkRoomCode) {
+    document.getElementById('room-code-input').value = deepLinkRoomCode;
+    send({ type: 'join_room', targetRoomCode: deepLinkRoomCode });
+  }
 }
 
 function deleteCredential(id) {
@@ -1366,6 +1436,17 @@ function openOwnedRoom(code) {
   send({ type: 'join_room', targetRoomCode: code });
 }
 
+function deleteOwnedRoom(code) {
+  if (!confirm(t('deleteRoomConfirm'))) return;
+  send({ type: 'delete_room', targetRoomCode: code });
+}
+
+function deleteCurrentRoom() {
+  if (!appState.roomCode || appState.myRole !== 'owner') return;
+  if (!confirm(t('deleteRoomConfirm'))) return;
+  send({ type: 'delete_room', targetRoomCode: appState.roomCode });
+}
+
 function leaveRoom() {
   send({ type: 'leave_room' });
 }
@@ -1385,6 +1466,14 @@ function joinSession() {
 function restoreSession() {
   const active = getActiveCredential();
   if (!active) {
+    enterJoinScreen();
+    renderCredentialList();
+    return;
+  }
+
+  if (deepLinkRoomCode) {
+    document.getElementById('name-input').value = active.name;
+    document.getElementById('avatar-input').value = active.avatar || '🙂';
     enterJoinScreen();
     renderCredentialList();
     return;
@@ -1445,6 +1534,12 @@ document.getElementById('name-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') joinSession();
 });
 
+deepLinkRoomCode = readDeepLinkRoomCode();
+if (deepLinkRoomCode) {
+  document.getElementById('room-code-input').value = deepLinkRoomCode;
+  toast(formatText(t('inviteDetected'), { code: deepLinkRoomCode }));
+}
+
 restoreSession();
 applyI18nStatic();
 
@@ -1471,7 +1566,11 @@ function renderOwnedRoomsJoin() {
         <div style="font-size:13px;font-weight:700">#${room.code} · ${escHtml(room.name)}</div>
         <div class="meta">${room.doneDemands}/${room.totalDemands} done</div>
       </div>
-      <button class="btn-xs" onclick="openOwnedRoom('${room.code}')">${t('enterRoom')}</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn-xs" onclick="openOwnedRoom('${room.code}')">${t('enterRoom')}</button>
+        <button class="btn-xs" onclick="shareRoomLink('${room.code}')">${t('shareRoom')}</button>
+        <button class="btn-xs danger" onclick="deleteOwnedRoom('${room.code}')">${t('deleteRoom')}</button>
+      </div>
     </div>
   `).join('');
 }
@@ -1492,7 +1591,9 @@ function render() {
   }
 
   document.getElementById('header-room').textContent = formatText(t('roomChip'), { code: appState.roomCode || '----' });
+  document.getElementById('share-room-btn').style.display = appState.roomCode ? 'inline-flex' : 'none';
   document.getElementById('leave-room-btn').style.display = appState.roomCode ? 'inline-flex' : 'none';
+  document.getElementById('delete-room-btn').style.display = appState.roomCode && appState.myRole === 'owner' ? 'inline-flex' : 'none';
   renderCredentialList();
   renderOwnedRoomsJoin();
 

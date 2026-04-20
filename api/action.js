@@ -71,6 +71,22 @@ module.exports = async (req, res) => {
       currentRoomCode = null;
       break;
     }
+    case 'delete_room': {
+      const requestedCode = sanitizeRoomCode(body.targetRoomCode || body.roomCode);
+      const targetRoom = getRoom(state, requestedCode);
+      if (!targetRoom) {
+        error = 'Room not found';
+      } else if (targetRoom.ownerSessionId !== sessionId) {
+        error = 'Only owner can delete room';
+      } else {
+        delete state.rooms[targetRoom.code];
+        if (currentRoomCode === targetRoom.code) {
+          currentRoomCode = null;
+          participant = null;
+        }
+      }
+      break;
+    }
     default: {
       if (!room) {
         error = 'Room not selected';
