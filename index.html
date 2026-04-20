@@ -1075,6 +1075,19 @@ function buildRoomShareUrl(roomCode) {
   return url.toString();
 }
 
+function syncRoomUrl(roomCode) {
+  const code = sanitizeRoomCodeLocal(roomCode);
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set('room', code);
+  else url.searchParams.delete('room');
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current && window.history?.replaceState) {
+    window.history.replaceState(null, '', next);
+  }
+  deepLinkRoomCode = code;
+}
+
 function loadCredentials() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_CREDENTIALS_KEY) || '[]');
@@ -1270,6 +1283,7 @@ async function fetchState(touch = false) {
       localStorage.removeItem(STORAGE_ROOM_KEY);
       myId = null;
     }
+    syncRoomUrl(currentRoomCode);
     if (data?.state) {
       appState = data.state;
       render();
@@ -1327,6 +1341,7 @@ async function postAction(obj) {
       localStorage.removeItem(STORAGE_ROOM_KEY);
       myId = null;
     }
+    syncRoomUrl(currentRoomCode);
     if (data?.state) {
       appState = data.state;
       render();
@@ -1523,6 +1538,7 @@ function changeUser() {
   mySessionId = null;
   myAvatar = '🙂';
   currentRoomCode = '';
+  syncRoomUrl('');
   myVotes = {};
   reconnecting = false;
   appState = {};
@@ -1543,6 +1559,7 @@ function resetBrowserData() {
   mySessionId = null;
   myAvatar = '🙂';
   currentRoomCode = '';
+  syncRoomUrl('');
   reconnecting = false;
   localStorage.removeItem(STORAGE_ACTIVE_CREDENTIAL_KEY);
   localStorage.removeItem(STORAGE_NAME_KEY);
