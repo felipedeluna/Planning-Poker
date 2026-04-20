@@ -56,6 +56,18 @@ module.exports = async (req, res) => {
       break;
     }
     case 'leave_room': {
+      if (room && participant) {
+        participant.online = false;
+        participant.lastSeen = 0;
+        for (const demand of room.demands || []) {
+          for (const round of demand.rounds || []) {
+            if (round.votes && Object.prototype.hasOwnProperty.call(round.votes, participant.id)) {
+              delete round.votes[participant.id];
+            }
+          }
+        }
+        room.updatedAt = Date.now();
+      }
       currentRoomCode = null;
       break;
     }
